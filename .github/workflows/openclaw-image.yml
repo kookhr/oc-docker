@@ -1,0 +1,77 @@
+name: build-openclaw-image
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 */6 * * *"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      base_digest: ${{ steps.check.outputs.base_digest }}
+    steps:
+      - name: Check upstream digest
+        id: check
+        run: |
+          set -euo pipefail
+
+          base_ref="ghcr.io/openclaw/openclaw:latest"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/openclaw"
+
+          base_digest=$(docker manifest inspect "${base_ref}" --verbose \
+            | jq -r '.Descriptor.digest')
+          base_digest=${base_digest#sha256:}
+
+          if [ -z "$base_digest" ] || [ "$base_digest" = "null" ]; then
+            echo "Failed to resolve upstream digest" >&2
+            exit 1
+          fi
+
+          echo "base_digest=$base_digest" >> "$GITHUB_OUTPUT"
+
+          if docker manifest inspect "${image}:base-${base_digest}" >/dev/null 2>&1; then
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/openclaw
+          tags: |
+            type=raw,value=base-${{ needs.check.outputs.base_digest }}
+            type=raw,value=base-${{ needs.check.outputs.base_digest }}-${{ github.run_number }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            OPENCLAW_BASE=ghcr.io/openclaw/openclaw:latest
+            OPENCLAW_BASE_DIGEST=sha256:${{ needs.check.outputs.base_digest }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
