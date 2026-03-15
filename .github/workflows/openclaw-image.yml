@@ -16,6 +16,7 @@ jobs:
       should_build: ${{ steps.check.outputs.should_build }}
       base_digest: ${{ steps.check.outputs.base_digest }}
     steps:
+      - uses: docker/setup-buildx-action@v3
       - name: Check upstream digest
         id: check
         run: |
@@ -24,14 +25,14 @@ jobs:
           base_ref="ghcr.io/openclaw/openclaw:latest"
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/openclaw"
 
-          base_digest=$(docker manifest inspect "${base_ref}" --verbose \
-            | jq -r '.Descriptor.digest')
-          base_digest=${base_digest#sha256:}
+          base_digest=$(docker buildx imagetools inspect "${base_ref}" --format '{{.Digest}}')
 
           if [ -z "$base_digest" ] || [ "$base_digest" = "null" ]; then
             echo "Failed to resolve upstream digest" >&2
             exit 1
           fi
+
+          base_digest=${base_digest#sha256:}
 
           echo "base_digest=$base_digest" >> "$GITHUB_OUTPUT"
 
