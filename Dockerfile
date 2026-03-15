@@ -1,7 +1,7 @@
 ARG OPENCLAW_BASE=ghcr.io/openclaw/openclaw:latest
 FROM ${OPENCLAW_BASE}
 
-LABEL org.opencontainers.image.base.name=$OPENCLAW_BASE
+USER root
 
 RUN set -eux; \
     apt-get update; \
@@ -11,3 +11,5 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     npm install -g clawhub; \
     npm cache clean --force || true
+
+USER node
