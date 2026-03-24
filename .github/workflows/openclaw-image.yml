@@ -3,7 +3,7 @@ name: build-openclaw-image
 on:
   workflow_dispatch:
   schedule:
-    - cron: "15 */6 * * *"
+    - cron: "15 0 */2 * *"
 
 permissions:
   contents: read
