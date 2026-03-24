@@ -29,16 +29,64 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve upstream base image
+        id: upstream
+        run: |
+          upstream_repo=ghcr.io/openclaw/openclaw
+          upstream_image="${upstream_repo}:latest"
+          digest=""
+          while IFS= read -r line; do
+            case "$line" in
+              Digest:*)
+                digest="${line#Digest:}"
+                digest="${digest#"${digest%%[![:space:]]*}"}"
+                digest="${digest%"${digest##*[![:space:]]}"}"
+                break
+                ;;
+            esac
+          done < <(docker buildx imagetools inspect "$upstream_image")
+
+          if [ -z "$digest" ]; then
+            echo "Failed to resolve digest for $upstream_image" >&2
+            exit 1
+          fi
+
+          {
+            echo "base_image=${upstream_repo}@${digest}"
+            echo "digest=${digest}"
+            echo "digest_tag=${digest#sha256:}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Normalize repository owner
+        id: owner
+        run: echo "value=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing digest tag
+        id: existing
+        run: |
+          image="ghcr.io/${{ steps.owner.outputs.value }}/openclaw:base-${{ steps.upstream.outputs.digest_tag }}"
+          if docker buildx imagetools inspect "$image" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build metadata
         id: meta
+        if: github.event_name != 'schedule' || steps.existing.outputs.exists != 'true'
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/openclaw
+          images: ghcr.io/${{ steps.owner.outputs.value }}/openclaw
           tags: |
             type=raw,value=latest
-            type=raw,value=${{ github.run_number }}
+            type=raw,value=base-${{ steps.upstream.outputs.digest_tag }}
+            type=raw,value=base-${{ steps.upstream.outputs.digest_tag }}-${{ github.run_number }}
+          labels: |
+            org.opencontainers.image.base.name=${{ steps.upstream.outputs.base_image }}
+            org.opencontainers.image.base.digest=${{ steps.upstream.outputs.digest }}
 
       - name: Build and push
+        if: github.event_name != 'schedule' || steps.existing.outputs.exists != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -49,6 +97,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            OPENCLAW_BASE=ghcr.io/openclaw/openclaw:latest
+            OPENCLAW_BASE=${{ steps.upstream.outputs.base_image }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
