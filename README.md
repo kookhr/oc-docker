@@ -9,10 +9,12 @@ official base image `ghcr.io/openclaw/openclaw:latest` and adds:
 
 ## Automation
 
-GitHub Actions checks the upstream `latest` image digest every 6 hours.
+GitHub Actions checks the upstream `latest` image digest every 2 days at 00:15 UTC.
 Scheduled runs only build when `base-<digest_tag>` for the current upstream
 image does not already exist in GHCR. Manual `workflow_dispatch` runs still
-rebuild and push the current digest-based tags.
+rebuild and push the current digest-based tags. Published tags stay tied to the
+upstream image digest, with `latest` always pointing at the newest wrapped image
+for that upstream base.
 
 Default image name: `ghcr.io/<owner>/openclaw`
 
@@ -35,7 +37,9 @@ services:
 
 ## Customize Image Name
 
-Update the `openclaw` suffix in the GHCR image references in `/.github/workflows/openclaw-image.yml`.
+Update `upstream_repo` in `./.github/workflows/openclaw-image.yml` if you need
+to track a different upstream image. The published image name remains
+`ghcr.io/<owner>/openclaw`.
 
 ## Notes
 
