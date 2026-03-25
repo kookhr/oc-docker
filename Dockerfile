@@ -1,6 +1,8 @@
 ARG OPENCLAW_BASE=ghcr.io/openclaw/openclaw:latest
 FROM ${OPENCLAW_BASE}
 
+ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 USER root
 
 RUN set -eux; \
