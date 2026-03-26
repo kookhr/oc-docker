@@ -14,7 +14,4 @@ RUN set -eux; \
     npm install -g clawhub; \
     npm cache clean --force || true
 
-COPY scripts/patch-streamto.js /tmp/patch-streamto.js
-RUN node /tmp/patch-streamto.js
-
 USER node
