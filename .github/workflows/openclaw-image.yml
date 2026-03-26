@@ -3,7 +3,11 @@ name: build-openclaw-image
 on:
   workflow_dispatch:
   schedule:
-    - cron: "15 0 */2 * *"
+    - cron: "15 * * * *"
+
+concurrency:
+  group: build-openclaw-image-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -61,32 +65,47 @@ jobs:
         id: owner
         run: echo "value=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
 
-      - name: Check existing digest tag
-        id: existing
+      - name: Check current published image state
+        id: state
         run: |
-          image="ghcr.io/${{ steps.owner.outputs.value }}/openclaw:base-${{ steps.upstream.outputs.digest_tag }}"
-          if docker buildx imagetools inspect "$image" > /dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+          image="ghcr.io/${{ steps.owner.outputs.value }}/openclaw:latest"
+          pull_output="$(docker pull "$image" 2>&1)" || pull_rc=$?
+          pull_rc="${pull_rc:-0}"
+
+          if [ "$pull_rc" -eq 0 ]; then
+            current_base_digest="$(docker image inspect "$image" --format '{{ index .Config.Labels "org.opencontainers.image.base.digest" }}')"
+            if [ -z "$current_base_digest" ] || [ "$current_base_digest" = "<no value>" ]; then
+              echo "Missing label org.opencontainers.image.base.digest on $image" >&2
+              exit 1
+            fi
+
+            if [ "$current_base_digest" = "${{ steps.upstream.outputs.digest }}" ]; then
+              echo "needs_build=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "needs_build=true" >> "$GITHUB_OUTPUT"
+            fi
+          elif echo "$pull_output" | grep -qiE 'not found|manifest unknown|name unknown'; then
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Failed to pull current image: $image" >&2
+            echo "$pull_output" >&2
+            exit "$pull_rc"
           fi
 
       - name: Build metadata
         id: meta
-        if: github.event_name != 'schedule' || steps.existing.outputs.exists != 'true'
+        if: github.event_name != 'schedule' || steps.state.outputs.needs_build == 'true'
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ steps.owner.outputs.value }}/openclaw
           tags: |
             type=raw,value=latest
-            type=raw,value=base-${{ steps.upstream.outputs.digest_tag }}
-            type=raw,value=base-${{ steps.upstream.outputs.digest_tag }}-${{ github.run_number }}
           labels: |
             org.opencontainers.image.base.name=${{ steps.upstream.outputs.base_image }}
             org.opencontainers.image.base.digest=${{ steps.upstream.outputs.digest }}
 
       - name: Build and push
-        if: github.event_name != 'schedule' || steps.existing.outputs.exists != 'true'
+        if: github.event_name != 'schedule' || steps.state.outputs.needs_build == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
